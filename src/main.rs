@@ -102,7 +102,7 @@ fn main() {
 
             for i in 0..BLOCK_SIZE {
                 let t_sec = (t + i) as f64 / SAMPLE_RATE as f64;
-                samples[i] = f64::sin(t_sec * 2.0 * f64::consts::PI * 220.0) as f32;
+                samples[i] = f64::sin(t_sec * 2.0 * f64::consts::PI * 220.0) as f32 / 2.0;
             }
 
             event_loop_proxy.send_event(samples);
