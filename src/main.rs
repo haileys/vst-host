@@ -1,22 +1,29 @@
 use std::env;
+use std::f64;
 use std::os::raw::c_void;
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use vst::api;
+use vst::buffer::AudioBuffer;
 use vst::editor::Rect;
 use vst::host::{Dispatch, PluginLoader};
 use vst::plugin::{OpCode, Plugin};
 use winit::dpi::LogicalSize;
+use winit::event::Event;
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
 struct Host;
 
 impl vst::host::Host for Host {
-    fn automate(&self, index: i32, value: f32) { todo!() }
+    fn automate(&self, index: i32, value: f32) {
+        println!("automate: index = {:?}; value = {:?}", index, value);
+    }
 
     fn get_plugin_id(&self) -> i32 { todo!() }
 
@@ -35,6 +42,9 @@ impl vst::host::Host for Host {
     fn update_display(&self) { todo!() }
 }
 
+const SAMPLE_RATE: usize = 44100;
+const BLOCK_SIZE: usize = SAMPLE_RATE / 100;
+
 fn main() {
     let path = PathBuf::from(env::args().nth(1).expect("pass plugin path on cmdline"));
 
@@ -43,6 +53,11 @@ fn main() {
     let mut plugin = loader.instance().unwrap();
     plugin.init();
     println!("{:?}", plugin.get_info());
+
+    plugin.set_sample_rate(SAMPLE_RATE as f32);
+    plugin.set_block_size(BLOCK_SIZE as i64);
+
+    plugin.resume();
 
     let (window_width, window_height) = unsafe {
         let mut rect = ptr::null::<Rect>();
@@ -56,7 +71,9 @@ fn main() {
         }
     };
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::<Vec<f32>>::with_user_event();
+
+    let event_loop_proxy = event_loop.create_proxy();
 
     let window = WindowBuilder::new()
         .with_inner_size(LogicalSize::new(window_width, window_height))
@@ -76,7 +93,88 @@ fn main() {
         plugin.dispatch(OpCode::EditorOpen, 0, 0, handle_ptr, 0.0);
     }
 
+    thread::spawn(move || {
+        let start = Instant::now();
+        let mut t = 0;
+
+        loop {
+            let mut samples = vec![0f32; BLOCK_SIZE];
+
+            for i in 0..BLOCK_SIZE {
+                let t_sec = (t + i) as f64 / SAMPLE_RATE as f64;
+                samples[i] = f64::sin(t_sec * 2.0 * f64::consts::PI * 220.0) as f32;
+            }
+
+            event_loop_proxy.send_event(samples);
+
+            t += BLOCK_SIZE;
+
+            let wait_until = start + Duration::from_millis(t as u64 * 1000 / SAMPLE_RATE as u64);
+            let now = Instant::now();
+            if wait_until > now {
+                thread::sleep(wait_until - now);
+            }
+        }
+    });
+
     event_loop.run(move |event, _, cflow| {
-        // println!("event: {:?}", event);
+        match event {
+            Event::NewEvents(_) => {}
+            Event::WindowEvent { window_id, event } => {
+                // println!("WindowEvent({:?}): {:?}", window_id, event);
+            }
+            Event::DeviceEvent { device_id, event } => {
+                // println!("DeviceEvent({:?}): {:?}", device_id, event);
+            }
+            Event::UserEvent(samples) => {
+                static EMPTY_INPUTS: [f32; BLOCK_SIZE] = [0f32; BLOCK_SIZE];
+
+                let inputs = [
+                    samples.as_ptr(),
+                    samples.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                    EMPTY_INPUTS.as_ptr(),
+                ];
+
+                let mut output_buffers = [
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                    vec![0f32; BLOCK_SIZE],
+                ];
+
+                let mut outputs = output_buffers.iter_mut()
+                    .map(|buff| buff.as_mut_ptr())
+                    .collect::<Vec<_>>();
+
+                let mut audio_buffer = unsafe {
+                    AudioBuffer::from_raw(
+                        inputs.len(),
+                        outputs.len(),
+                        inputs.as_ptr(),
+                        outputs.as_mut_ptr(),
+                        BLOCK_SIZE,
+                    )
+                };
+
+                plugin.process(&mut audio_buffer);
+            }
+            Event::Suspended => {}
+            Event::Resumed => {}
+            Event::MainEventsCleared => {}
+            Event::RedrawRequested(window_id) => {
+                println!("redrawing window: {:?}", window_id);
+            }
+            Event::RedrawEventsCleared => {}
+            Event::LoopDestroyed => {}
+        }
     });
 }
