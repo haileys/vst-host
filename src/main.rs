@@ -1,9 +1,12 @@
 use std::env;
+use std::os::raw::c_void;
 use std::path::PathBuf;
+use std::ptr;
 use std::sync::{Arc, Mutex};
 
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use vst::api;
+use vst::editor::Rect;
 use vst::host::{Dispatch, PluginLoader};
 use vst::plugin::{OpCode, Plugin};
 use winit::dpi::LogicalSize;
@@ -41,10 +44,22 @@ fn main() {
     plugin.init();
     println!("{:?}", plugin.get_info());
 
+    let (window_width, window_height) = unsafe {
+        let mut rect = ptr::null::<Rect>();
+        plugin.dispatch(OpCode::EditorGetRect, 0, 0, &mut rect as *mut *const _ as *mut c_void, 0.0);
+
+        if rect != ptr::null() {
+            let rect = *rect;
+            (rect.right - rect.left, rect.bottom - rect.top)
+        } else {
+            panic!("EditorGetRect failed");
+        }
+    };
+
     let event_loop = EventLoop::new();
 
     let window = WindowBuilder::new()
-        // .with_inner_size(LogicalSize::new(window_width, window_height))
+        .with_inner_size(LogicalSize::new(window_width, window_height))
         .with_resizable(false)
         .with_title("VST Host")
         .build(&event_loop)
