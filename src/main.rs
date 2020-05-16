@@ -15,7 +15,7 @@ use vst::host::{Dispatch, PluginLoader};
 use vst::plugin::{OpCode, Plugin};
 use winit::dpi::LogicalSize;
 use winit::event::Event;
-use winit::event_loop::EventLoop;
+use winit::event_loop::{EventLoop, ControlFlow};
 use winit::window::WindowBuilder;
 
 struct Host;
@@ -118,6 +118,8 @@ fn main() {
     });
 
     event_loop.run(move |event, _, cflow| {
+        *cflow = ControlFlow::Wait;
+
         match event {
             Event::NewEvents(_) => {}
             Event::WindowEvent { window_id, event } => {
