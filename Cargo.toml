@@ -1,0 +1,10 @@
+[package]
+name = "vst-host"
+version = "0.1.0"
+authors = ["Charlie Somerville <charlie@charlie.bz>"]
+edition = "2018"
+
+[dependencies]
+raw-window-handle = "0.3"
+vst = { git = "https://github.com/charliesome/vst-rs", branch = "pub-dispatch" }
+winit = "0.22"
